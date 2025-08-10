@@ -1,4 +1,4 @@
-(in-package :hu.dwim.tblgen-to-assembler)
+(in-package :hu.dwim.tablegen-to-assembler)
 
 ;;;; Grammar based on LLVM TableGen Programmer's Reference.
 ;;;; See: https://llvm.org/docs/TableGen/ProgRef.html
@@ -6,6 +6,10 @@
 ;;; ---------------------------
 ;;; Whitespace & Comments
 ;;; ---------------------------
+
+(defrule eol
+    (or #\Newline #\Return)
+  (:constant :eol))
 
 ;; Single whitespace character (space, tab, newline, return, formfeed)
 (defrule ws-char
@@ -19,8 +23,8 @@
 (defrule line-comment
   ;; '//' until newline or EOF (newline optional at EOF)
   (and "//"
-       (* (not (or #\Newline #\Return)))
-       (? (or #\Newline #\Return)))
+       (* (not eol))
+       (? eol))
   (:constant nil))
 
 ;; Nested C-style block comment:
@@ -43,11 +47,22 @@
   (:constant nil))
 
 ;;; ---------------------------
+;;; Preprocessing
+;;; ---------------------------
+(defrule include-decl
+    (and "include" ws one-string opt-ws)
+  (:lambda (x) (list :include (nth 2 x))))
+
+(defrule preprocessor-statement
+    ;; TODO? #define, #ifdef, #ifndef
+    (or include-decl))
+
+;;; ---------------------------
 ;;; Character classes
 ;;; ---------------------------
 
 (defrule alpha
-  (character-ranges (#\a #\z) (#\A #\Z) #\_))
+    (character-ranges (#\a #\z) (#\A #\Z) #\_))
 
 (defrule digit
   (character-ranges (#\0 #\9)))
@@ -76,7 +91,8 @@
 ;; DecimalInteger: optional sign + digits
 (defrule decimal-integer
   (and (? (or "+" "-")) (+ digit))
-  (:lambda (chars) (parse-integer (coerce chars 'string))))
+  (:lambda (elements)
+    (parse-integer (coerce (second elements) 'string))))
 
 ;; Hex integer: 0x... (allow uppercase X)
 (defrule hex-integer
@@ -174,15 +190,31 @@
 ;;;  bit | int | string | code | dag | bits< N > | list< T > | ClassID
 ;;; ---------------------------
 
+(defrule bits-type
+    (and "bits" opt-ws "<" opt-ws integer opt-ws ">")
+  (:lambda (elements)
+    (list :bits-type (fifth elements))))
+
+(defrule list-type
+    (and "list" opt-ws "<" opt-ws type opt-ws ">")
+  (:lambda (elements)
+    (list :list-type (fifth elements))))
+
 (defrule type
   (and
    (or "bit" "int" "string" "code" "dag"
-       (and "bits" opt-ws "<" opt-ws integer opt-ws ">")
-       (and "list" opt-ws "<" opt-ws type opt-ws ">")
+       bits-type
+       ;;(and "bits" opt-ws "<" opt-ws integer opt-ws ">")
+       list-type
+       ;;(and "list" opt-ws "<" opt-ws type opt-ws ">")
        identifier)
    ;; whitespace after a top-level type token
    (? ws))
-  (:lambda (x) x))
+  (:lambda (elements)
+    (let ((type (first elements)))
+      (if (stringp type)
+          (list :type type)
+          type))))
 
 ;;; ---------------------------
 ;;; Expressions / Values
@@ -235,7 +267,8 @@
 ;; list literal: [ expr, expr, ... ]
 (defrule list-literal
   (and "[" opt-ws (? expr-list) opt-ws "]")
-  (:lambda (x) (nth 2 x)))
+  (:lambda (x)
+    (list* :list (nth 2 x))))
 
 ;; DAG: (op, arg1, arg2, ...) — op may be a string or identifier
 (defrule dag
@@ -343,7 +376,6 @@
 ;;; Statements (top-level)
 ;;; ---------------------------
 
-;; class Decl: class NAME <params>? ( : Parent<args> )? { body } ;
 (defrule record-body
     (and "{" opt-ws (* field-assign) opt-ws "}")
   (:lambda (x) (nth 2 x)))
@@ -372,13 +404,16 @@
     (and identifier (* (and opt-ws "," opt-ws identifier)))
   (:lambda (x) (cons (first x) (mapcar #'fourth (second x)))))
 
+;; class Decl: class NAME <params>? ( : Parent<args> )? { body } ;
 (defrule class-decl
-    (and "class" ws identifier opt-ws (? template-params) opt-ws (? inherit) opt-ws (? record-body) opt-ws ";")
-  (:lambda (x) (list :class (nth 2 x) :params (nth 4 x) :inherit (nth 6 x) :body (nth 8 x))))
+    (and "class" ws identifier opt-ws (? template-params) opt-ws (? inherit) opt-ws
+         (? record-body))
+  (:lambda (x)
+    (list :class (nth 2 x) :params (nth 4 x) :inherit (nth 6 x) :body (nth 8 x))))
 
 (defrule def-decl
     (and "def" ws identifier opt-ws (? inherit) opt-ws (? template-args) opt-ws
-         (? record-body) opt-ws ";")
+         (? record-body))
   (:lambda (x)
     (list :def (nth 2 x)
           :inherit (nth 4 x)
@@ -386,61 +421,77 @@
           :body (nth 8 x))))
 
 (defrule multiclass-decl
-    (and "multiclass" ws identifier opt-ws (? template-params) opt-ws (? inherit) opt-ws (? record-body) opt-ws ";")
+    (and "multiclass" ws identifier opt-ws (? template-params) opt-ws (? inherit)
+         opt-ws (? record-body))
   (:lambda (x) (list :multiclass (nth 2 x) :params (nth 4 x) :inherit (nth 6 x) :body (nth 8 x))))
 
 (defrule defm-decl
-    (and "defm" ws identifier opt-ws (? template-args) opt-ws (? record-body) opt-ws ";")
+    (and "defm" ws identifier opt-ws (? template-args) opt-ws (? record-body))
   (:lambda (x) (list :defm (nth 2 x) :template (nth 4 x) :body (nth 6 x))))
 
 (defrule let-decl
-    (and "let" ws identifier opt-ws "=" opt-ws expr opt-ws ";")
+    (and "let" ws identifier opt-ws "=" opt-ws expr)
   (:lambda (x) (list :let (nth 2 x) (nth 6 x))))
 
-(defrule include-decl
-    (and "include" ws one-string opt-ws)
-  (:lambda (x) (list :include (nth 2 x))))
-
 (defrule defset-decl
-    (and "defset" ws identifier opt-ws (? record-body) opt-ws ";")
+    (and "defset" ws identifier opt-ws (? record-body))
   (:lambda (x) (list :defset (nth 2 x) :body (nth 4 x))))
 
 (defrule deftype-decl
-    (and "deftype" ws identifier opt-ws "=" opt-ws type opt-ws ";")
+    (and "deftype" ws identifier opt-ws "=" opt-ws type)
   (:lambda (x) (list :deftype (nth 2 x) (nth 6 x))))
 
 (defrule defvar-decl
-    (and "defvar" ws identifier opt-ws "=" opt-ws expr opt-ws ";")
+    (and "defvar" ws identifier opt-ws "=" opt-ws expr)
   (:lambda (x) (list :defvar (nth 2 x) (nth 6 x))))
 
 ;; foreach, if, dump, assert have tree-like forms — rough parse here:
 (defrule foreach-decl
-    (and "foreach" ws identifier ws "in" ws expr opt-ws record-body opt-ws ";")
+    (and "foreach" ws identifier ws "in" ws expr opt-ws record-body)
   (:lambda (x) (list :foreach (nth 2 x) :in (nth 6 x) :body (nth 8 x))))
 
-(defrule if-decl
-    (and "if" ws expr ws "then" opt-ws (? statement-list) opt-ws (? (and "else" opt-ws (? statement-list))) opt-ws "endif")
-  (:lambda (x) (list :if (nth 2 x) :then (nth 4 x) :else (nth 6 x))))
-
 (defrule dump-decl
-    (and "dump" ws (? expr) opt-ws ";")
+    (and "dump" ws (? expr))
   (:lambda (x) (list :dump (nth 2 x))))
 
 (defrule assert-decl
-    (and "assert" ws expr opt-ws ";")
+    (and "assert" ws expr)
   (:lambda (x) (list :assert (nth 2 x))))
 
+;; TODO this is not connected anywhere
+(defrule if-decl
+    (and "if" ws expr ws "then" opt-ws (? statement-list) opt-ws
+         (? (and "else" opt-ws (? statement-list)))
+         opt-ws
+         "endif")
+  (:lambda (x) (list :if (nth 2 x) :then (nth 4 x) :else (nth 6 x))))
+
 (defrule statement
-    (and opt-ws (or class-decl def-decl multiclass-decl defm-decl let-decl include-decl defset-decl deftype-decl defvar-decl foreach-decl dump-decl assert-decl) opt-ws)
+    (and opt-ws
+         (or class-decl
+             def-decl
+             multiclass-decl
+             defm-decl
+             let-decl
+             defset-decl
+             deftype-decl
+             defvar-decl
+             foreach-decl
+             dump-decl
+             assert-decl)
+         opt-ws ";")
   (:lambda (x) (second x)))
 
 (defrule statement-list
-    (and (* statement) opt-ws)
-  (:lambda (x) (mapcar #'second (first x))))
+    (* (or (and opt-ws preprocessor-statement)
+           (and opt-ws statement)))
+  (:lambda (x)
+    (mapcar #'second x)))
 
 (defrule tablegen-file
-    (and opt-ws (* statement) opt-ws)
-  (:lambda (x) (mapcar #'second (second x))))
+    (and opt-ws statement-list)
+  (:lambda (x)
+    (second x)))
 
 (defun x ()
   (let ((input (uiop:read-file-string "/home/alendvai/common-lisp/maru/source/assembler/X86/X86.td")))
@@ -474,3 +525,39 @@
     FeatureSSE42
   ])"))
     (esrap:parse 'expr input)))
+
+(defun x7 ()
+  (let ((input "class Proc<string Name, list<SubtargetFeature> Features,
+           list<SubtargetFeature> TuneFeatures>
+ : ProcessorModel<Name, GenericModel, Features, TuneFeatures>;"))
+    (esrap:parse 'tablegen-file input)))
+
+(defun x8 ()
+  (let ((input "{
+  // x86-64 micro-architecture levels: x86-64 and x86-64-v[234]
+  list<SubtargetFeature> X86_64V1Features = [
+    FeatureX87, FeatureCX8, FeatureCMOV, FeatureMMX, FeatureSSE2,
+    FeatureFXSR, FeatureNOPL, FeatureX86_64,
+  ];
+}"))
+    (esrap:parse 'record-body input)))
+
+(defun x9 ()
+  (let ((input "def ProcessorFeatures {
+  // x86-64 micro-architecture levels: x86-64 and x86-64-v[234]
+  list<SubtargetFeature> X86_64V1Features = [
+    FeatureX87, FeatureCX8, FeatureCMOV, FeatureMMX, FeatureSSE2,
+    FeatureFXSR, FeatureNOPL, FeatureX86_64,
+  ];
+}"))
+    (esrap:parse 'def-decl input)))
+
+(defun x10 ()
+  (let ((input "list<SubtargetFeature> "))
+    (esrap:parse 'type input)))
+
+(defun x11 ()
+  (let ((input "include \"zork\"
+def Is64Bit : SubtargetFeature<\"64bit-mode\", \"Is64Bit\", \"true\",
+                               \"64-bit mode (x86_64)\">;"))
+    (esrap:parse 'tablegen-file input)))
