@@ -2,25 +2,28 @@
 
 ## What
 
-An experiment to parse LLVM's TableGen file format, with the ultimate
-goal of generating an assembler for x86_64.
+An experiment to parse the json output of LLVM's TableGen, with the
+ultimate goal of generating an x86_64 assembler.
 
 ## Status
 
-**It's a pre-alpha nothingburger.** It can almost parse the X86.tb file,
-but I have abandoned it because I'm now looking into doing the same
-but from
-[Sleigh](https://ghidra.re/ghidra_docs/languages/html/sleigh.html)
-(part of [Ghidra](https://github.com/NationalSecurityAgency/ghidra)).
+**It's an alpha nothingburger.**
 
-LLVM's TableGen DSL seems to be the wrong choice in 2025. It also
-smells too much like C++ (i.e. too much accidental complexity).
+It can parse the json version of X86.tb as a stream, and can
+walk/filter the instructions. Nothing is generated for now.
 
 ## Why
 
-I need an x86_64 assembler for
-[Maru](https://github.com/attila-lendvai/maru), and I'm hoping to
-later port this experiment to Maru.
+My ultimate goal is an x86_64 assembler for
+[Maru](https://github.com/attila-lendvai/maru).
+
+But it's easier to work in a mature language with Slime, so I'm hoping
+to finish this CL lib and then either:
+
+  - port this to Maru (ideal outcome),
+
+  - or simply generate the assembler for Maru and check it in into its
+    repo (a less pleasing but more pragmatic shortcut).
 
 ## Who
 
