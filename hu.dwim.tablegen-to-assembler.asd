@@ -5,7 +5,7 @@
   :version "0.1"
 
   :depends-on (:alexandria
-               :esrap)
+               :json-streams)
 ;;  :in-order-to ((test-op (test-op :hu.dwim.tablegen-to-assembler/test)))
   :components ((:module "source"
                 :components ((:file "package")
