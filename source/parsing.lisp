@@ -27,12 +27,12 @@
       (assert (eql 8 (length value)))
       value)))
 
-(defun json-bitfield-to-integer (bit-list &optional (count (length bit-list)))
+;; https://llvm.org/docs/TableGen/BackEnds.html#json-reference
+;; "A bits array is ordered from least-significant bit to most-significant."
+(defun json-bitfield-to-integer (bit-list)
   (let ((result 0))
     (loop :for i = 0 :then (incf i)
-          :while (and bit-list
-                      (< i count))
-          :for bit = (pop bit-list)
+          :for bit :in (reverse bit-list)
           :do (progn
                 (setf result (ash result 1))
                 (eswitch (bit)
@@ -41,8 +41,8 @@
     result))
 
 (defun get-instr-flag (obj flag-name)
-  (let ((value (getf (getf obj :flags) flag-name)))
-    ;; return unset flags as zero
+  (let ((value (getf obj flag-name)))
+    ;; return unset flags as zero (optimization against noise)
     (or value 0)))
 
 (defun normalize-instruction (obj)
@@ -51,35 +51,49 @@
         (tsflags (json-value obj "TSFlags")))
     (assert (eq :array (pop tsflags)))
     (macrolet ((pop-bits (count)
-                 (with-unique-names (val)
-                   `(let ((,val (json-bitfield-to-integer tsflags ,count)))
-                      (setf tsflags (nthcdr ,count tsflags))
-                      ,val)))
+                 (once-only (count)
+                   (with-unique-names (bits val)
+                     `(let* ((,bits (subseq tsflags 0 ,count))
+                             (,val (json-bitfield-to-integer ,bits)))
+                        (setf tsflags (nthcdr ,count tsflags))
+                        ,val))))
                (set-field (name value)
                  `(setf (getf result ,name) ,value))
                (set-flag (name value)
                  (once-only (value)
                    `(unless (zerop ,value)
-                      (setf (getf (getf result :flags) ,name) ,value)))))
+                      ;; TODO ? (setf (getf (getf result :flags) ,name) ,value)
+                      (setf (getf result ,name) ,value)
+                      ))))
       (set-field :mnemonic (asm-mnemonic obj))
+      (set-field :name (json-value obj "!name"))
+
+      (let ((form-entry (json-value obj "Form")))
+        (assert (eq :object (pop form-entry)))
+        (set-field :form (intern (json-value form-entry "def") :keyword)))
 
       ;; see: https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/X86/MCTargetDesc/X86BaseInfo.h#L692
-      (set-flag :form-mask  (pop-bits 6))
-      (set-flag :op-size    (pop-bits 2))
-      (set-flag :ad-size    (pop-bits 2))
-      (set-flag :op-prefix  (pop-bits 2))
-      (set-flag :op-map     (pop-bits 4))
-      (set-flag :rex        (pop-bits 1))
-      (set-flag :imm        (pop-bits 4))
-      (set-flag :fp-type    (pop-bits 3))
-      (set-flag :lock       (pop-bits 1))
-      (set-flag :rep        (pop-bits 1))
-      (set-flag :sse-domain (pop-bits 2))
-      (set-flag :encoding   (pop-bits 2))
-      (set-flag :opcode     (pop-bits 8))
+      (set-flag :form-bits  (pop-bits 7)) ; 0-7
+      (set-flag :op-size    (pop-bits 2)) ; 8-9
+      (set-flag :ad-size    (pop-bits 2)) ; 10-11
+      (set-flag :op-prefix  (pop-bits 2)) ; 12-13
+      (set-flag :op-map     (pop-bits 4)) ; 14-17
+      (set-flag :rex        (pop-bits 1)) ; 18
+      (set-flag :imm        (pop-bits 4)) ; 19-22
+      (set-flag :fp-type    (pop-bits 3)) ; 23-25
+      (set-flag :lock       (pop-bits 1)) ; 26
+      (set-flag :rep        (pop-bits 1)) ; 27
+      (set-flag :sse-domain (pop-bits 2)) ; 28-29
+      (set-flag :encoding   (pop-bits 2)) ; 30-31
+      (let ((opcode (pop-bits 8))         ; 32-39
+            (opcode2 (json-bitfield-value obj "Opcode")))
+        (set-flag :opcode opcode)
+        ;; assert that the extracted json opcode is the same as the
+        ;; one encoded into the tsflags.
+        (assert (equal opcode opcode2)))
 
-      ;; :vector contains all the rest of the flags for easy checking for complex insts
-      (set-flag :vector     (json-bitfield-to-integer tsflags))
+      ;; :vector contains all the rest of the flags for easy checking for complex instructions
+      (set-flag :vector     (json-bitfield-to-integer tsflags)) ; 40-
 
       (set-flag :vex-4v     (pop-bits 1))
       (set-flag :vex-l      (pop-bits 1))
@@ -161,7 +175,7 @@
                               (assert (eq :object (pop obj)))
                               (assert (equal "X86" (json-value obj "Namespace")))
                               (incf emit-counter)
-                              (format *error-output* "~&; calling emitter for ~S~%" (getf instr :mnemonic))
+                              ;; (format *error-output* "~&; calling emitter for ~S~%" (getf instr :mnemonic))
                               (funcall instruction-emitter instr :raw-json obj))))))))
                  (toplevel-key))
 
@@ -169,50 +183,70 @@
             (toplevel)))
         (format *error-output* "~&; called the emitter for ~S instructions~%" emit-counter)))))
 
-(defun x ()
-  (let (;;(insts '("IMUL" "IDIV" "MOV" "XOR" "ADD" "SUB" "PUSH" "POP"))
-        (predicate-blacklist '(:|Mode16|
-                               :|Not64BitMode|
-                               :|UseSSE1|
-                               :|UseSSE2|
-                               :|UseSSSE3|
-                               :|UseSSE41|
-                               :|UseSSE42|
-                               :|HasSSEPrefetch|
-                               :|UseAVX|
-                               :|HasAVX|
-                               :|HasAVX2|
-                               :|HasAVX512|
-                               :|HasF16C| ; SSE; half-precision (16-bit) fp -> single-precision (32-bit) fp
-                               :|HasRTM|
-                               :|HasTSXLDTRK|
-                               :|HasWBNOINVD|
-                               :|HasAMXTILE|
-                               :|HasAMXMOVRS|
-                               :|HasAMXTRANSPOSE|
-                               :|HasAMXCOMPLEX|
-                               :|HasMOVRS|
-                               :|HasPCLMUL|
-                               :|HasTBM|
-                               :|HasCLDEMOTE|
-                               :|HasUINTR|
-                               ))
-        (instr-counter 0)
-        (emit-counter 0))
-    (process-x86-json "/home/alendvai/common-lisp/maru/source/assembler/x86.json"
-                      (lambda (obj &key raw-json)
-                        (incf instr-counter)
-                        (let* ((predicates (getf obj :predicates))
-                               (include? (loop :for blacklisted :in predicate-blacklist
-                                               :always (not (member blacklisted predicates :test 'eq)))))
-                          (when include?
-                            (incf emit-counter)
-                            (print obj)
-                            (print raw-json)))
+(defvar *code-output-stream*)
 
-                        ;; (let ((mnemonic (getf obj :mnemonic)))
-                        ;;   (when (starts-with-subseq "unpck" mnemonic)
-                        ;;     (print obj)
-                        ;;     (print raw-json)))
-                        ))
-    (format *error-output* "~&; emitted ~S of ~S instructions~%" emit-counter instr-counter)))
+(defun generate-form (form)
+  (let ((*standard-output* *code-output-stream*)
+        (*print-case* :downcase))
+    (pprint form)
+    (terpri)
+    (force-output)))
+
+(defun generate-x86-instruction-emitter (instr)
+  (destructuring-bind (&key name mnemonic opcode form &allow-other-keys)
+      instr
+    (format *error-output* "~&; emitting ~S / ~S~%" name mnemonic)
+    ;; (when (equal mnemonic "adc{w}	{$src, %ax|ax, $src}")
+    ;;   (break))
+    ;; (when (equal name "CALL64pcrel32")
+    ;;   (break))
+    (case form
+      (:|RawFrm|
+       (assert (< opcode 256))
+       (generate-form `(defun ,name () (emit-byte ,opcode)))))))
+
+(defun generate-assembler/x86_64 (&key (print-source? nil))
+  (with-output-to-file (*code-output-stream*
+                        (asdf:system-relative-pathname :hu.dwim.tablegen-to-assembler "source/generated.lisp")
+                        :if-exists :supersede)
+    (let ((predicate-blacklist '(:|Mode16|
+                                 :|Not64BitMode|
+                                 :|UseSSE1|
+                                 :|UseSSE2|
+                                 :|UseSSSE3|
+                                 :|UseSSE41|
+                                 :|UseSSE42|
+                                 :|HasSSEPrefetch|
+                                 :|UseAVX|
+                                 :|HasAVX|
+                                 :|HasAVX2|
+                                 :|HasAVX512|
+                                 :|HasF16C| ; SSE; half-precision (16-bit) fp -> single-precision (32-bit) fp
+                                 :|HasRTM|
+                                 :|HasTSXLDTRK|
+                                 :|HasWBNOINVD|
+                                 :|HasAMXTILE|
+                                 :|HasAMXMOVRS|
+                                 :|HasAMXTRANSPOSE|
+                                 :|HasAMXCOMPLEX|
+                                 :|HasMOVRS|
+                                 :|HasPCLMUL|
+                                 :|HasTBM|
+                                 :|HasCLDEMOTE|
+                                 :|HasUINTR|
+                                 ))
+          (instr-counter 0)
+          (emit-counter 0))
+      (process-x86-json "/home/alendvai/common-lisp/maru/source/assembler/x86.json"
+                        (lambda (obj &key raw-json)
+                          (incf instr-counter)
+                          (let* ((predicates (getf obj :predicates))
+                                 (include? (loop :for blacklisted :in predicate-blacklist
+                                                 :always (not (member blacklisted predicates :test 'eq)))))
+                            (when include?
+                              (incf emit-counter)
+                              (when print-source?
+                                (print obj)
+                                (print raw-json))
+                              (generate-x86-instruction-emitter obj)))))
+      (format *error-output* "~&; emitted ~S of ~S instructions~%" emit-counter instr-counter))))
