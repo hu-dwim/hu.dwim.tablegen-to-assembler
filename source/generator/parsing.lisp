@@ -48,37 +48,13 @@
                   (0 (values)))))
     result))
 
-(defun get-instr-flag (obj flag-name)
-  (let ((value (getf (getf obj :flags) flag-name)))
-    ;; return unset flags as zero (optimization against noise)
-    (or value 0)))
-
-;; NOTE: no, this won't work because obj should be a place...
-;; (defun (setf get-instr-flag) (value obj flag-name)
-;;   (setf (getf (getf obj :flags) flag-name) value))
-
 (defun normalize-instruction (obj)
   (assert (eq :object (pop obj)))
-  (let ((result ())
-        ;; TODO You don’t usually need to decode TSFlags by hand,
-        ;; because the higher-level fields (OpPrefix, OpMap, OpEnc)
-        ;; already abstract it.
-        (tsflags (json-value obj "TSFlags" :array)))
-    (macrolet ((pop-bits (count)
-                 (once-only (count)
-                   (with-unique-names (bits val)
-                     `(let* ((,bits (subseq tsflags 0 ,count))
-                             (,val (json-bitfield-to-integer ,bits)))
-                        (setf tsflags (nthcdr ,count tsflags))
-                        ,val))))
-               (set-field (name value)
+  (let ((result ()))
+    (macrolet ((set-field (name value)
                  `(setf (getf result ,name) ,value))
                (get-field (name)
-                 `(getf result ,name))
-               (set-flag (name value)
-                 (once-only (value)
-                   `(unless (zerop ,value)
-                      (setf (getf (getf result :flags) ,name) ,value)))))
+                 `(getf result ,name)))
       (set-field :mnemonic (asm-mnemonic obj))
       (set-field :name (json-value obj "!name"))
 
@@ -86,41 +62,6 @@
         (set-field :form (intern (json-value form-entry "def") :keyword)))
 
       (set-field :opcode (json/bitfield-value obj "Opcode"))
-
-      ;; see: https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/X86/MCTargetDesc/X86BaseInfo.h#L692
-      (set-flag :form-bits  (pop-bits 7)) ; 0-7
-      (set-flag :op-size    (pop-bits 2)) ; 8-9
-      (set-flag :ad-size    (pop-bits 2)) ; 10-11
-      (set-flag :op-prefix  (pop-bits 2)) ; 12-13
-      (set-flag :op-map     (pop-bits 4)) ; 14-17
-      (set-flag :rex        (pop-bits 1)) ; 18
-      (set-flag :imm        (pop-bits 4)) ; 19-22
-      (set-flag :fp-type    (pop-bits 3)) ; 23-25
-      (set-flag :lock       (pop-bits 1)) ; 26
-      (set-flag :rep        (pop-bits 1)) ; 27
-      (set-flag :sse-domain (pop-bits 2)) ; 28-29
-      (set-flag :encoding   (pop-bits 2)) ; 30-31
-      (let ((opcode (pop-bits 8)))        ; 32-39
-        ;; assert that the extracted json opcode is the same as the
-        ;; one encoded into the tsflags.
-        (assert (equal opcode (get-field :opcode))))
-
-      ;; :vector contains all the rest of the flags for easy checking for complex instructions
-      (set-flag :vector     (json-bitfield-to-integer tsflags)) ; 40-
-
-      (set-flag :vex-4v     (pop-bits 1))
-      (set-flag :vex-l      (pop-bits 1))
-      (set-flag :evex-k     (pop-bits 1))
-      (set-flag :evex-z     (pop-bits 1))
-      (set-flag :evex-l2    (pop-bits 1))
-      (set-flag :evex-b     (pop-bits 1))
-      (set-flag :cd8-scale  (pop-bits 3))
-      (set-flag :evex-rc    (pop-bits 1))
-      (set-flag :no-track   (pop-bits 1))
-      (set-flag :explicit-op-prefix (pop-bits 2))
-      (set-flag :evex-nf    (pop-bits 1))
-      (set-flag :two-conditional (pop-bits 1))
-      (set-flag :evex-u     (pop-bits 1))
 
       (let ((preds (json-value obj "Predicates" :array)))
         (loop :with kwpkg = (find-package :keyword)
@@ -176,13 +117,19 @@
 
 ;; called on the raw json
 (defun json/include-instruction? (obj)
-  (and (asm-mnemonic obj)
+  (and (not (ends-with-subseq "_PREFIX" (json-value obj "!name")))
+       (asm-mnemonic obj)
        (not (pseudo-instruction?  obj))
-       (get-encoding obj)))
+       (get-encoding obj)
+       (let* ((tsflags (json-value obj "TSFlags" :array))
+              (vector-flags (subseq tsflags 40)))
+         ;; for now skip all the "fancy" instructions
+         (every 'zerop vector-flags))))
 
 ;; called on the normalized plist form
 (defun include-instruction? (obj)
-  (zerop (get-instr-flag obj :vector)))
+  (declare (ignore obj))
+  t)
 
 (defun process-x86-json (path instruction-emitter)
   (declare (optimize (speed 3)) ; needed to force-enable tail call optimization
