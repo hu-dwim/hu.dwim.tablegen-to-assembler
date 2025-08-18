@@ -5,11 +5,19 @@
   :version "0.1"
 
   :depends-on (:alexandria
-               :json-streams)
+               :json-streams
+               :uiop)
 ;;  :in-order-to ((test-op (test-op :hu.dwim.tablegen-to-assembler/test)))
   :components ((:module "source"
-                :components ((:file "package")
-                             (:file "parsing")))))
+                :components
+                ((:module "generator"
+                  :components ((:file "package")
+                               (:file "parsing")))
+                 (:module "assembler"
+                  :components ((:file "package")
+                               (:file "assembler")
+                               ;; (:file "x86-instructions")
+                               ))))))
 
 ;; (defsystem :hu.dwim.tablegen-to-assembler/test
 ;;   :depends-on (:hu.dwim.stefil
