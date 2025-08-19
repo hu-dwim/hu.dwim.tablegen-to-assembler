@@ -1,16 +1,17 @@
-# hu.dwim.tablegen-to-assembler
+# hu.dwim.genassem
 
 ## What
 
-An experiment to parse the json output of LLVM's TableGen, with the
-ultimate goal of generating an x86_64 assembler.
+A suite to parse the json output of LLVM's TableGen, and use it to
+generate an assemblers.
 
 ## Status
 
-**It's an alpha nothingburger.**
+**It's work in progress.**
 
 It can parse the json version of X86.tb as a stream, and can
-walk/filter the instructions. Nothing is generated for now.
+walk/filter the instructions. Work is underway to generate the x86_64
+assembler.
 
 ## Why
 
@@ -32,4 +33,4 @@ Written by [attila@lendvai.name](mailto:attila@lendvai.name).
 ## Where
 
 The primary communication channel is the facilities on
-[the project's GitHub page](https://github.com/hu-dwim/hu.dwim.tablegen-to-assembler).
+[the project's GitHub page](https://github.com/hu-dwim/hu.dwim.genassem).

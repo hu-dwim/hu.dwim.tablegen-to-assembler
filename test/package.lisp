@@ -4,8 +4,12 @@
 ;;;
 ;;; See LICENCE for details.
 
-(uiop:define-package :hu.dwim.genassem
+(in-package :cl)
+
+(defpackage :hu.dwim.genassem/x86.test
   (:use :common-lisp
-        :alexandria
+        :hu.dwim.stefil
         :hu.dwim.genassem/x86)
-  (:export))
+  (:export
+   #:test
+   ))

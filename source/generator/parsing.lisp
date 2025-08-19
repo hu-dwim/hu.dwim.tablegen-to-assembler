@@ -1,4 +1,10 @@
-(in-package :hu.dwim.tablegen-to-assembler)
+;;; -*- mode: Lisp; Syntax: Common-Lisp; -*-
+;;;
+;;; Copyright (c) 2025 by the authors.
+;;;
+;;; See LICENCE for details.
+
+(in-package :hu.dwim.genassem)
 
 (defun json-value (obj key &optional of-type)
   (let ((result (cdr (assoc key obj :test 'equal))))
@@ -239,12 +245,12 @@
 
 (defun generate-assembler/x86_64 (&key
                                     (print-source? nil)
-                                    (package :hu.dwim.x86-assembler))
+                                    (package :hu.dwim.genassem/x86))
   (unless (packagep package)
     (setf package (find-package package)))
   (with-output-to-file
       (out-stream (asdf:system-relative-pathname
-                   :hu.dwim.tablegen-to-assembler
+                   :hu.dwim.genassem
                    "source/assembler/x86-instructions.lisp")
                   :if-exists :supersede)
     (with-standard-io-syntax
