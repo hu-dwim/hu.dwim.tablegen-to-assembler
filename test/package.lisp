@@ -7,7 +7,9 @@
 (in-package :cl)
 
 (defpackage :hu.dwim.genassem/x86.test
-  (:use :common-lisp
+  (:use :alexandria
+        :anaphora
+        :common-lisp
         :hu.dwim.stefil
         :hu.dwim.genassem/x86)
   (:export

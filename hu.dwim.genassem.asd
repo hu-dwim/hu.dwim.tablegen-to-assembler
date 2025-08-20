@@ -11,6 +11,7 @@
   :version "0.1"
 
   :depends-on (:alexandria
+               :anaphora
                :hu.dwim.genassem/asm-base
                :json-streams
                :uiop)
@@ -27,6 +28,7 @@
   :version "0.1"
 
   :depends-on (:alexandria
+               :anaphora
                :uiop)
   :components ((:module "source"
                 :components
@@ -42,6 +44,7 @@
   :version "0.1"
 
   :depends-on (:alexandria
+               :anaphora
                :hu.dwim.genassem/asm-base
                :uiop)
   :in-order-to ((test-op (test-op :hu.dwim.genassem/x86.test)))
@@ -53,6 +56,7 @@
 
 (defsystem :hu.dwim.genassem/x86.test
   :depends-on (:alexandria
+               :anaphora
                :hu.dwim.stefil
                :hu.dwim.genassem
                :uiop

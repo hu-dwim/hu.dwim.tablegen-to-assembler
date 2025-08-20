@@ -5,8 +5,9 @@
 ;;; See LICENCE for details.
 
 (uiop:define-package :hu.dwim.genassem/asm-base
-  (:use :common-lisp
-        :alexandria
+  (:use :alexandria
+        :anaphora
+        :common-lisp
         )
   (:export
    #:emit-byte
@@ -14,8 +15,9 @@
    ))
 
 (uiop:define-package :hu.dwim.genassem/x86
-  (:use :common-lisp
-        :alexandria
+  (:use :alexandria
+        :anaphora
+        :common-lisp
         :hu.dwim.genassem/asm-base
         )
   (:export
