@@ -201,47 +201,114 @@
 (defun intern/asm (str)
   (intern (string-upcase str)))
 
+(define-constant rex.w #x08)
+(define-constant rex.r #x04)
+(define-constant rex.x #x02)
+(define-constant rex.b #x01)
+
 (defun generate-x86-instruction-emitter (instr)
-  (destructuring-bind (&key name args mnemonic opcode
+  (destructuring-bind (&key name args mnemonic opcode op-map
                          op-prefix ;op-prefix/explicit
                          form
                        &allow-other-keys)
       instr
     ;;(format *error-output* "~&; emitting ~S / ~S~%" name mnemonic)
-    ;; (when (equal mnemonic "adc{w}	{$src, %ax|ax, $src}")
-    ;;   (break))
-    (when (equal name "RETI64")
-      (break))
-    ;; (when (starts-with-subseq "OUT" name)
-    ;;   (break))
+    (assert (<= opcode 255))
     (labels
         (
          ;; (skip-instruction ()
          ;;   (format *error-output* "; skipping ~S~%" name)
          ;;   (return-from generate-x86-instruction-emitter))
          )
-      (let ((prefix (ecase op-prefix
-                      ((nil)     ())
-                      (:pd       #x66)
-                      ((:sd :xd) #xf2)
-                      ((:ps :xs) #xf3))))
-        (case form
-          (:|RawFrm|
-           ;; RawFrm specifically means raw form: the instruction has no special ModR/M or opcode map handling—it’s just a fixed sequence of bytes.
-           (assert (< opcode 256))
-           (emit-form
-            `(defun ,(intern/asm (concatenate 'string "_" name))
-                 ,(remove nil
-                   (mapcar (lambda (arg)
-                             (destructuring-bind (name . type)
-                                 arg
-                               (declare (ignore type))
-                               (assert (stringp name))
-                               (intern/asm name)))
-                    args))
-               ,@(when prefix
-                   `((emit-byte ,prefix)))
-               (emit-byte ,opcode)))))))))
+      (let ((prefix-bytes (make-array 8 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+            (lisp-name (intern/asm (concatenate 'string "_" name)))
+            (arg-names (remove nil
+                               (mapcar (lambda (arg)
+                                         (destructuring-bind (name . type)
+                                             arg
+                                           (declare (ignore type))
+                                           (assert (stringp name))
+                                           (intern/asm name)))
+                                       args)))
+            (opcode-prefix-forms nil))
+        (ecase op-prefix
+          ((nil)     ())
+          (:pd       (vector-push-extend #x66 prefix-bytes))
+          ((:sd :xd) (vector-push-extend #xf2 prefix-bytes))
+          ((:ps :xs) (vector-push-extend #xf3 prefix-bytes)))
+        (case op-map
+          (:tb (push `(emit-byte #x0f) opcode-prefix-forms)))
+
+        (let ((prefix-forms (loop :for byte :across prefix-bytes
+                                  :collect `(emit-byte ,byte))))
+          ;; (when (equal mnemonic "adc{w}	{$src, %ax|ax, $src}")
+          ;;   (break))
+          ;; (when (equal name "RET64")
+          ;;   (break))
+          ;; (when (starts-with-subseq "OUT" name)
+          ;;   (break))
+          (case form
+            (:|RawFrm|
+             ;; RawFrm specifically means raw form: the instruction has no special ModR/M or opcode map handling—it’s just a fixed sequence of bytes.
+             (emit-form
+              `(defmacro ,lisp-name ,arg-names
+                 `(progn
+                    ,@',prefix-forms
+                    ,@',opcode-prefix-forms
+                    (emit-byte ,',opcode))))
+             lisp-name)
+            (:|AddRegFrm|
+             (emit-form
+              `(defmacro ,lisp-name ,arg-names
+                 (multiple-value-bind (reg-index reg-mode reg-extra-bit)
+                     (register-name->encoding-bits ,(first arg-names))
+                   `(progn
+                      ,@',prefix-forms
+                      (when (eql ,reg-mode 64)
+                        ;; emit REX.W + the reg extra bit
+                        (emit-byte (logior #x48 ,(if reg-extra-bit rex.b 0))))
+                      ,@',opcode-prefix-forms
+                      (emit-byte (logior ,',opcode ,reg-index))))))
+             lisp-name)
+            (:|RawFrmDstSrc|)
+            (:|RawFrmImm8|)
+            (:|MRMDestMem|)
+            (:|MRM_E0|)
+            (:|MRM_E1|)
+            (:|MRM_C0|)
+            (:|MRM_CA|)
+            (:|MRM_CF|)
+            (:|MRM_FC|)
+            (:|MRM_D7|)
+            (:|MRM_D9|)
+            (:|MRM_DD|)
+            (:|MRM_F0|)
+            (:|MRM_F6|)
+            (:|MRM_FA|)
+            (:|MRM_FB|)
+            (:|MRM_FF|)
+            (:|MRMXr|)
+            (:|MRM1m|)
+            (:|MRM2m|)
+            (:|MRM3m|)
+            (:|MRM4m|)
+            (:|MRM5m|)
+            (:|MRM6m|)
+            (:|MRM7m|)
+            (:|MRM1r|)
+            (:|MRM2r|)
+            (:|MRM3r|)
+            (:|MRM4r|)
+            (:|MRM5r|)
+            (:|MRM6r|)
+            (:|MRM7r|)
+            (:|MRMSrcMem|)
+            (:|MRMSrcMem4VOp3|)
+            (:|MRMSrcReg|)
+            (:|MRMSrcReg4VOp3|)
+            (:|MRMDestReg|)
+            (:|MRM0m|)
+            (:|MRM0r|)))))))
 
 (defun generate-assembler/x86_64 (&key
                                     (print-source? nil)
@@ -260,34 +327,36 @@
             (*package* package))
         (write-string ";;; This file is generated, editing it is unwise.")
         (pprint `(in-package ,(intern (package-name package) :keyword)))
-        (let ((predicate-blacklist '(:|Mode16|
-                                     :|Not64BitMode|
-                                     :|UseSSE1|
-                                     :|UseSSE2|
-                                     :|UseSSE3|
-                                     :|UseSSE41|
-                                     :|UseSSE42|
-                                     :|HasSSEPrefetch|
-                                     :|UseAVX|
-                                     :|HasAVX|
-                                     :|HasAVX2|
-                                     :|HasAVX512|
-                                     :|HasF16C| ; SSE; half-precision (16-bit) fp -> single-precision (32-bit) fp
-                                     :|HasRTM|
-                                     :|HasTSXLDTRK|
-                                     :|HasWBNOINVD|
-                                     :|HasAMXTILE|
-                                     :|HasAMXMOVRS|
-                                     :|HasAMXTRANSPOSE|
-                                     :|HasAMXCOMPLEX|
-                                     :|HasMOVRS|
-                                     :|HasPCLMUL|
-                                     :|HasTBM|
-                                     :|HasCLDEMOTE|
-                                     :|HasUINTR|
-                                     ))
+        (let ((predicate-blacklist
+                '(:|Mode16|
+                  :|Not64BitMode|
+                  :|UseSSE1|
+                  :|UseSSE2|
+                  :|UseSSE3|
+                  :|UseSSE41|
+                  :|UseSSE42|
+                  :|HasSSEPrefetch|
+                  :|UseAVX|
+                  :|HasAVX|
+                  :|HasAVX2|
+                  :|HasAVX512|
+                  :|HasF16C| ; SSE; half-precision (16-bit) fp -> single-precision (32-bit) fp
+                  :|HasRTM|
+                  :|HasTSXLDTRK|
+                  :|HasWBNOINVD|
+                  :|HasAMXTILE|
+                  :|HasAMXMOVRS|
+                  :|HasAMXTRANSPOSE|
+                  :|HasAMXCOMPLEX|
+                  :|HasMOVRS|
+                  :|HasPCLMUL|
+                  :|HasTBM|
+                  :|HasCLDEMOTE|
+                  :|HasUINTR|
+                  ))
               (instr-counter 0)
-              (emit-counter 0))
+              (emit-counter 0)
+              (symbols-to-export ()))
           (process-x86-json "/home/alendvai/common-lisp/maru/source/assembler/x86.json"
                             (lambda (obj &key raw-json)
                               (incf instr-counter)
@@ -301,6 +370,9 @@
                                       (when print-source?
                                         (print obj)
                                         (print raw-json))
-                                      (generate-x86-instruction-emitter obj))
+                                      (push (generate-x86-instruction-emitter obj)
+                                            symbols-to-export))
                                     (write-char #\x *error-output*)))))
-          (format *error-output* "~&; emitted ~S of ~S instructions~%" emit-counter instr-counter))))))
+          (emit-form `(export '(,@ (remove nil symbols-to-export))))
+          (format *error-output* "~&; emitted ~S of ~S instructions~%"
+                  emit-counter instr-counter))))))

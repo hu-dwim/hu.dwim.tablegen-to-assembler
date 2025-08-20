@@ -29,3 +29,37 @@
 
 (defun emit-byte (byte)
   (vector-push-extend byte (buffer-of *asm-context*)))
+
+(define-constant +x86-registers/16+ '(ax cx dx bx sp bp si di) :test 'equal)
+(define-constant +x86-registers/32+ '(eax ecx edx ebx esp ebp esi edi) :test 'equal)
+(define-constant +x86-registers/64+ '(rax rcx rdx rbx rsp rbp rsi rdi) :test 'equal)
+
+(declaim (inline register-index))
+(defun register-index (name registers &optional (default nil default?))
+  (declare (type symbol name))
+  (or (position name registers :test 'string=)
+      (if default?
+          default
+          (error "Unexpected register name: ~S" name))))
+
+(defun register-name->encoding-bits (name)
+  (declare (optimize (debug 3))
+           (type symbol name))
+  (let ((name/s (symbol-name name)))
+    (case (elt name/s 0)
+      (#\R (aif (register-index name +x86-registers/64+ nil)
+                (values it 64 nil)
+                (values (let ((length (length name/s))
+                              (index (- (char-code (elt name/s 1))
+                                        (char-code #\0))))
+                          (ecase length
+                            (2 (values))
+                            (3 (setf index (+ (* index 10)
+                                              (- (char-code (elt name/s 2))
+                                                 (char-code #\0))))))
+                          (unless (<= 8 index 15)
+                            (error "Unexpected register name: ~S" name))
+                          index)
+                        64 1)))
+      (#\E (values (register-index name +x86-registers/32+) 32 nil))
+      (t (values (register-index name +x86-registers/16+) 16 nil)))))

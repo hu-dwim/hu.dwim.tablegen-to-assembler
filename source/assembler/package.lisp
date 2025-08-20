@@ -12,6 +12,7 @@
   (:export
    #:emit-byte
    #:with-asm
+   #:register-name->encoding-bits
    ))
 
 (uiop:define-package :hu.dwim.genassem/x86
@@ -23,4 +24,5 @@
   (:export
    #:emit-byte
    #:with-asm
+   #:register-name->encoding-bits
    ))

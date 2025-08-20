@@ -58,7 +58,7 @@
   :depends-on (:alexandria
                :anaphora
                :hu.dwim.stefil
-               :hu.dwim.genassem
+               :hu.dwim.genassem/x86
                :uiop
                ;; you probably also want to load :hu.dwim.stefil+swank one way or another
                )

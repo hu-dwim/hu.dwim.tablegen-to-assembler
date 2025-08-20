@@ -24,10 +24,16 @@
 (defparameter *simple-tests*
 '(((_ret64)
    (_hlt)
-   (_hlt)
+   (_pause)
+   (_bswap32r edx)
+   (_bswap64r r14)
+   (_noop)
    "00000000  C3                ret
 00000001  F4                hlt
-00000002  F4                hlt
+00000002  F390              pause
+00000004  0FCA              bswap edx
+00000006  490FCE            bswap r14
+00000009  90                nop
 ")))
 
 (deftest simple ()
