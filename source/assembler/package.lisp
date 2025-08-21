@@ -12,6 +12,7 @@
   (:export
    #:emit-byte
    #:with-asm
+   #:buffer-of
    #:register-name->encoding-bits
    ))
 
@@ -24,5 +25,6 @@
   (:export
    #:emit-byte
    #:with-asm
+   #:buffer-of
    #:register-name->encoding-bits
    ))

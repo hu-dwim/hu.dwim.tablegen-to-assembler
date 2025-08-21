@@ -182,9 +182,6 @@
                               (assert (equal "X86" (json-value obj "Namespace")))
                               (incf emit-counter)
                               ;; (format *error-output* "~&; calling emitter for ~S~%" (getf instr :mnemonic))
-                              ;; TODO delme
-                              (when (starts-with-subseq "RET" token)
-                                (format t "~&; ~A" obj))
                               (funcall instruction-emitter instr :raw-json obj))))))))
                  (toplevel-key)))
             (toplevel)))))))
